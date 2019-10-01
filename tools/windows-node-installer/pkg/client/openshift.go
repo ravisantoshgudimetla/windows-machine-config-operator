@@ -22,7 +22,7 @@ type OpenShift struct {
 
 // GetOpenShift uses kubeconfig to create a client for existing OpenShift cluster and returns it or an error.
 func GetOpenShift(kubeConfigPath string) (*OpenShift, error) {
-	log.V(0).Info(fmt.Sprintf("kubeconfig source: %s", kubeConfigPath))
+	log.Info(fmt.Sprintf("kubeconfig source: %s", kubeConfigPath))
 
 	rc, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
 	if err != nil {

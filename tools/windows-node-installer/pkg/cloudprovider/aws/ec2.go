@@ -26,6 +26,13 @@ var log = logger.Log.WithName("aws-ec2")
 // cluster that is running on EC2.
 // This is an implementation of the Cloud interface.
 type awsProvider struct {
+	// imageID is the AMI image-id to be used for creating Virtual Machine
+	imageID string
+	// instanceType is the flavor of VM to be used
+	instanceType string
+	// sshKey is the ssh key to access the VM created. Please note that key should be uploaded to AWS before
+	// using this flag
+	sshKey string
 	// A client for EC2.
 	EC2 *ec2.EC2
 	// A client for IAM.
@@ -41,7 +48,7 @@ type awsProvider struct {
 // credentialAccountID is the account name the user uses to create VM instance.
 // The credentialAccountID should exist in the AWS credentials file pointing at one specific credential.
 // resourceTrackerDir is where created instance and security group information is stored.
-func New(openShiftClient *client.OpenShift, credentialPath, credentialAccountID,
+func New(imageID, instanceType, sshKey string, openShiftClient *client.OpenShift, credentialPath, credentialAccountID,
 	resourceTrackerDir string) (*awsProvider, error) {
 	provider, err := openShiftClient.GetCloudProvider()
 	if err != nil {
@@ -51,7 +58,8 @@ func New(openShiftClient *client.OpenShift, credentialPath, credentialAccountID,
 	if err != nil {
 		return nil, err
 	}
-	return &awsProvider{ec2.New(session, aws.NewConfig()),
+	return &awsProvider{imageID, instanceType, sshKey,
+		ec2.New(session, aws.NewConfig()),
 		iam.New(session, aws.NewConfig()),
 		openShiftClient,
 		resourceTrackerDir,
@@ -82,7 +90,7 @@ func newSession(credentialPath, credentialAccountID, region string) (*awssession
 // - logs id and security group information of the created instance in 'windows-node-installer.json' file at the
 // resourceTrackerDir.
 // On success, the function outputs RDP access information in the commandline interface.
-func (a *awsProvider) CreateWindowsVM(imageId, instanceType, sshKey string) (rerr error) {
+func (a *awsProvider) CreateWindowsVM() error {
 	// Obtains information from AWS and the existing OpenShift cluster for creating an instance.
 	infraID, err := a.openShiftClient.GetInfrastructureID()
 	if err != nil {
@@ -97,7 +105,7 @@ func (a *awsProvider) CreateWindowsVM(imageId, instanceType, sshKey string) (rer
 		return fmt.Errorf("failed to get cluster worker IAM, %v", err)
 	}
 
-	instance, err := a.createInstance(imageId, instanceType, sshKey, networkInterface, workerIAM)
+	instance, err := a.createInstance(a.imageID, a.instanceType, a.sshKey, networkInterface, workerIAM)
 	if err != nil {
 		return err
 	}
@@ -110,7 +118,7 @@ func (a *awsProvider) CreateWindowsVM(imageId, instanceType, sshKey string) (rer
 	}
 	_, err = a.createInstanceNameTag(instance, infraID)
 	if err != nil {
-		log.V(0).Info(fmt.Sprintf("failed to assign name for instance: %s, %v", instanceID, err))
+		log.Info(fmt.Sprintf("failed to assign name for instance: %s, %v", instanceID, err))
 	}
 
 	err = resource.AppendInstallerInfo([]string{instanceID}, []string{}, a.resourceTrackerDir)
@@ -120,7 +128,7 @@ func (a *awsProvider) CreateWindowsVM(imageId, instanceType, sshKey string) (rer
 	}
 
 	// Output commandline message to help RDP into the created instance.
-	log.V(0).Info(fmt.Sprintf("Successfully created windows instance: %s, please RDP into the Windows instance.",
+	log.Info(fmt.Sprintf("Successfully created windows instance: %s, please RDP into the Windows instance.",
 		instanceID))
 
 	return nil
@@ -130,7 +138,7 @@ func (a *awsProvider) CreateWindowsVM(imageId, instanceType, sshKey string) (rer
 // 'windows-node-installer.json' file. The security groups still in use by other instances will not be deleted.
 func (a *awsProvider) DestroyWindowsVMs() error {
 	// Read from `windows-node-installer.json` file.
-	log.V(0).Info(fmt.Sprintf("processing file '%s'", a.resourceTrackerDir))
+	log.Info(fmt.Sprintf("processing file '%s'", a.resourceTrackerDir))
 	destroyList, err := resource.ReadInstallerInfo(a.resourceTrackerDir)
 	if err != nil {
 		return err
@@ -168,7 +176,7 @@ func (a *awsProvider) DestroyWindowsVMs() error {
 	// Update 'windows-node-installer.json' file.
 	err = resource.RemoveInstallerInfo(terminatedInstances, deletedSg, a.resourceTrackerDir)
 	if err != nil {
-		log.V(0).Info(fmt.Sprintf("%s file was not updated, %v", a.resourceTrackerDir, err))
+		log.Info(fmt.Sprintf("%s file was not updated, %v", a.resourceTrackerDir, err))
 	}
 	return nil
 }
@@ -393,7 +401,7 @@ func (a *awsProvider) getVPCByInfrastructure(infraID string) (*ec2.Vpc, error) {
 	if len(res.Vpcs) < 1 {
 		return nil, fmt.Errorf("failed to find the VPC of the infrastructure")
 	} else if len(res.Vpcs) > 1 {
-		log.V(0).Info(fmt.Sprintf("more than one VPC is found, using %s", *res.Vpcs[0].VpcId))
+		log.Info(fmt.Sprintf("more than one VPC is found, using %s", *res.Vpcs[0].VpcId))
 	}
 	return res.Vpcs[0], nil
 }
@@ -487,7 +495,7 @@ func (a *awsProvider) isSGInUse(sgID string) (bool, error) {
 	}
 
 	if len(reservingInstances) > 0 {
-		log.V(0).Info(fmt.Sprintf("Security Group %s is in use by: %s", sgID, strings.Join(reservingInstances, ", ")))
+		log.Info(fmt.Sprintf("Security Group %s is in use by: %s", sgID, strings.Join(reservingInstances, ", ")))
 		return true, nil
 	}
 	return false, nil
