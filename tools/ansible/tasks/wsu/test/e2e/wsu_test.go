@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"k8s.io/client-go/tools/clientcmd"
 	"os"
 	"os/exec"
 	"strings"
@@ -14,6 +15,8 @@ import (
 	"github.com/openshift/windows-machine-config-operator/tools/windows-node-installer/pkg/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sclient "k8s.io/client-go/kubernetes"
 )
 
 var (
@@ -41,6 +44,8 @@ var (
 	createdInstanceCreds *types.Credentials
 	// Temp directory ansible created on the windows host
 	ansibleTempDir = ""
+	// workerLabel is the worker label that needs to be applied to the Windows node
+	workerLabel = "node-role.kubernetes.io/worker="
 )
 
 // createAWSWindowsInstance creates a windows instance and populates the "cloud" and "createdInstanceCreds" global
@@ -79,6 +84,19 @@ ansible_winrm_server_cert_validation=ignore`, ip, password, clusterAddress))
 	return hostFile.Name(), err
 }
 
+func getKubeClient() (*k8sclient.Clientset, error) {
+	kubeconfig := os.Getenv("KUBECONFIG")
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		return nil, err
+	}
+	kclient, err := k8sclient.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	return kclient, nil
+}
+
 // TestWSU creates a Windows instance, runs the WSU, and then runs a series of tests to ensure all expected
 // behavior was achieved. The following environment variables must be set for this test to run: KUBECONFIG,
 // AWS_SHARED_CREDENTIALS_FILE, ARTIFACT_DIR, KUBE_SSH_KEY_PATH, WSU_PATH, CLUSTER_ADDR
@@ -114,6 +132,10 @@ func TestWSU(t *testing.T) {
 
 	t.Run("Files copied to Windows node", testFilesCopied)
 	// TODO: Once the WSU starts the WMCB and adds the node to the cluster, add check to see if the node is "Ready"
+	// Assuming the WSU is capable of running WMCB and it initializes properly, test if the Windows node has
+	// proper worker label.
+	// TODO: Uncomment this once we're running WMCB via WSU
+	// t.Run("Check if worker label has been applied to the Windows node", testWorkerLabelsArePresent)
 }
 
 // testFilesCopied tests that the files we attempted to copy to the Windows host, exist on the Windows host
@@ -135,4 +157,14 @@ func testFilesCopied(t *testing.T) {
 		assert.Emptyf(t, stdout.String(), "Missing file: %s", fullPath)
 	}
 
+}
+
+// testWorkerLabelsArePresent tests if the worker labels are present on the Windows Node.
+func testWorkerLabelsArePresent(t *testing.T) {
+	client, err := getKubeClient()
+	require.NoErrorf(t, err, "error getting kubeclient: %v", err)
+	// Check if the Windows node has the required label needed.
+	winNodes, err := client.CoreV1().Nodes().List(metav1.ListOptions{LabelSelector: workerLabel})
+	require.NoErrorf(t, err, "error while getting Windows node: %v", err)
+	assert.Lenf(t, winNodes.Items, 1, "expected one node to have node label but found: %v", len(winNodes.Items))
 }

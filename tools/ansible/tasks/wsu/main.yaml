@@ -2,7 +2,7 @@
 - hosts: localhost
   vars:
     project_root: "{{ playbook_dir }}/../../../.."
-    kubelet_location: "https://dl.k8s.io/v1.14.0/kubernetes-node-windows-amd64.tar.gz"
+    kubelet_location: "https://dl.k8s.io/v1.16.2/kubernetes-node-windows-amd64.tar.gz"
     wmcb_exe: "wmcb.exe"
 
   tasks:
@@ -36,6 +36,18 @@
           copy:
             src: "{{ tmp_dir.path }}/kubernetes/node/bin/kubelet.exe"
             dest: "{{ tmp_dir.path }}/kubelet.exe"
+
+        # Assuming bootstrap has been run, get all the Windows node bootstrapped via WMCB which have no worker labels.
+        - name: Get all the Windows node bootstrapped via WMCB without worker labels
+          shell: "oc get nodes -l 'node.openshift.io/os_id=Windows, !node-role.kubernetes.io/worker' -o name"
+          register: windows_nodes_without_worker_labels
+
+        # Apply worker label to the Windows nodes bootstrapped via WMCB
+        - name: Label all the Windows nodes without worker labels
+          shell: "oc label {{ item }} node-role.kubernetes.io/worker="
+          with_items: "{{ windows_nodes_without_worker_labels.stdout_lines }}"
+
+
 
 - hosts: win
   vars:
