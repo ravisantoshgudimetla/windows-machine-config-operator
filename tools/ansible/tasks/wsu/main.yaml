@@ -3,6 +3,8 @@
   vars:
     project_root: "{{ playbook_dir }}/../../../.."
     kubelet_location: "https://dl.k8s.io/v1.16.2/kubernetes-node-windows-amd64.tar.gz"
+    hybrid-overlay_location: "https://github.com/openshift/windows-machine-config-operator/releases/download/0.1/hybrid-overlay.exe"
+    cni_location: "https://github.com/containernetworking/plugins/releases/download/v0.8.2/cni-plugins-windows-amd64-v0.8.2.tgz"
     wmcb_exe: "wmcb.exe"
 
   tasks:
@@ -13,6 +15,11 @@
           tempfile:
             state: directory
           register: tmp_dir
+
+        - name: Create directory to store cni binaries to be used later
+            tempfile:
+              state: directory
+            register: tmp_cnidir
 
         - name: Build WMCB
           make:
@@ -47,6 +54,31 @@
           shell: "oc label {{ item }} node-role.kubernetes.io/worker="
           with_items: "{{ windows_nodes_without_worker_labels.stdout_lines }}"
 
+        # Transfer the hybrid-overlay binary to the Windows node
+        - name: Transfer hybrid-overlay to the Windows node
+          get_url:
+            src: "{{ hybrid-overlay_location }}"
+            dest: "{{ tmp_cnidir.path }}/hybrid_overlay.exe"
+
+        # Download the required cni binaries
+        - name: Download cni binaries
+          get_url:
+            url: "{{ cni_location }}"
+            dest: "{{ tmp_cnidir.path }}/cni.tar.gz"
+
+        # Extract cni binaries
+        - name: Extract cni binaries
+          unarchive:
+            src: "{{ tmp_cnidir.path }}/cni.tar.gz"
+            dest: "{{ tmp_cnidir.path }}"
+
+        # Transfer cni config file. Ideally this should be generated for each node.
+        # TODO: Have a template for each node and transfer the node.
+        - name: Transfer the cni config file
+          copy:
+            src: "cni.conf"
+            dest: "{{ tmp_cnidir.path }}/cni.conf"
+
 
 
 - hosts: win
@@ -58,13 +90,34 @@
       win_tempfile:
         state: directory
       register: win_temp_dir
+
+    - name: Create cni temporary directory
+      win_tempfile:
+        state: directory
+      register: win_temp_cni_dir
+
     - name: Copy required files to Windows host
       win_copy:
         src: "{{ hostvars['localhost']['tmp_dir']['path'] }}/"
         dest: "{{ win_temp_dir.path }}"
 
+    - name: Copy cni files to the Windows host
+      win_copy: "{{ hostvars['localhost']['tmp_cnidir']['path'] }}/"
+        src: "{{ hostvars['localhost']['tmp_cnidir']['path'] }}/"
+        dest: "{{ win_temp_cni_dir }}"
+
     - name: Get ignition file
       win_get_url:
         url: "https://api-int.{{ cluster_address }}:22623/config/worker"
-        dest: "{{ win_temp_dir.path }}\\worker.ign"
+        dest: "{{ win_temp_cni_dir.path }}\\worker.ign"
         validate_certs: no
+
+
+    - name: Run hybrid overlay
+      win_shell: "{{ win_temp_dir.path }}\\hybrid-overlay.exe --node  {{ item }} --k8s-kubeconfig c:\k\kubeconfig"
+      with_items: "{{ hostvars['localhost']['windows_nodes_without_worker_labels.stdout_lines'] }}"
+
+    - name: Run WMCB cni config
+      win_shell: "{{ win_temp_dir.path }}\\wmcb.exe configure-cni --cni-path {{ win_temp_cni_dir }} --cni-config {{ win_temp_cni_dir }}/cni.conf"
+      register: bootstrap_out
+
