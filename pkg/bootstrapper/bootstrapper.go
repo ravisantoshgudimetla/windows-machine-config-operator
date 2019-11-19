@@ -174,6 +174,14 @@ func prepKubeletConfForWindows(wmcb *winNodeBootstrapper, initialConfig []byte) 
 	// Putting a placeholder value here to be removed later in the function
 	config.EnforceNodeAllocatable = []string{"THIS_MUST_BE_EMPTY"}
 
+	// Delete featuregates that we don't need
+	if _, ok := config.FeatureGates["ExperimentalCriticalPodAnnotation"]; ok {
+		delete(config.FeatureGates, "ExperimentalCriticalPodAnnotation")
+	}
+	if _, ok := config.FeatureGates["TLSSecurityProfile"]; ok {
+		delete(config.FeatureGates, "TLSSecurityProfile")
+	}
+
 	// Turn the config into a json marshalled []byte
 	out, err = json.Marshal(config)
 	if err != nil {
