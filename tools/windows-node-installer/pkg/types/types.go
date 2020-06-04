@@ -63,7 +63,7 @@ type WindowsVM interface {
 	// Credentials are returned before usage.
 	GetCredentials() *Credentials
 	// Reinitialize re-initializes the Windows VM. Presently only the ssh client is reinitialized.
-	Reinitialize() error
+	Reinitialize(bool) error
 }
 
 func (w *Windows) CopyFile(filePath, remoteDir string) error {
@@ -153,19 +153,25 @@ func (w *Windows) GetCredentials() *Credentials {
 	return w.Credentials
 }
 
-func (w *Windows) Reinitialize() error {
-	if err := w.GetSSHClient(); err != nil {
+func (w *Windows) Reinitialize(overPrivateIP bool) error {
+	if err := w.GetSSHClient(overPrivateIP); err != nil {
 		return fmt.Errorf("failed to reinitialize ssh client: %v", err)
 	}
-	if err := w.SetupWinRMClient(); err != nil {
+	if err := w.SetupWinRMClient(overPrivateIP); err != nil {
 		return fmt.Errorf("failed to reinitialize WinRM client: %v", err)
 	}
 	return nil
 }
 
-// SetupWinRMClient sets up the winrm client to be used while accessing Windows node
-func (w *Windows) SetupWinRMClient() error {
-	host := w.Credentials.GetIPAddress()
+// SetupWinRMClient sets up the winrm client to be used while accessing Windows node. If overPrivateIP has been set,
+// the WinRM connection gets established via privateIP else connection happens over public IP
+func (w *Windows) SetupWinRMClient(overPrivateIP bool) error {
+	var host string
+	if overPrivateIP {
+		host = w.Credentials.GetPrivateIPAddress()
+	} else {
+		host = w.Credentials.GetPublicIPAddress()
+	}
 	password := w.Credentials.GetPassword()
 	user := w.Credentials.GetUserName()
 	// Connect to the bootstrapped host. Timeout is high as the Windows Server image is slow to download
@@ -216,22 +222,28 @@ func (w *Windows) ConfigureOpenSSHServer() error {
 	return nil
 }
 
-// GetSSHClient gets the ssh client associated with Windows VM created
-func (w *Windows) GetSSHClient() error {
+// GetSSHClient gets the ssh client associated with Windows VM created. If overPrivateIP has been set, the ssh
+// connection gets established via privateIP else connection happens over public IP
+func (w *Windows) GetSSHClient(overPrivateIP bool) error {
 	if w.SSHClient != nil {
 		// Close the existing client to be on the safe side
 		if err := w.SSHClient.Close(); err != nil {
 			log.Printf("warning - error closing ssh client connection: %v", err)
 		}
 	}
-
+	var host string
+	if overPrivateIP {
+		host = w.Credentials.GetPrivateIPAddress()
+	} else {
+		host = w.Credentials.GetPublicIPAddress()
+	}
 	config := &ssh.ClientConfig{
 		User:            w.Credentials.GetUserName(), //TODO: Change this to make sure that this works for Azure.
 		Auth:            []ssh.AuthMethod{ssh.Password(w.Credentials.GetPassword())},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 
-	sshClient, err := ssh.Dial("tcp", w.Credentials.GetIPAddress()+":22", config)
+	sshClient, err := ssh.Dial("tcp", host+":22", config)
 	if err != nil {
 		return fmt.Errorf("failed to dial to ssh server: %s", err)
 	}
@@ -243,23 +255,31 @@ func (w *Windows) GetSSHClient() error {
 type Credentials struct {
 	// instanceID uniquely identifies the instanceID
 	instanceID string
-	// ipAddress contains the public ip address of the instance created
-	ipAddress string
+	// publicIPAddress contains the public ip address of the instance created
+	publicIPAddress string
+	// privateIPAddress contains the private ip address of the instance created
+	privateIPAddress string
 	// password to access the instance created
 	password string
 	// user used for accessing the  instance created
 	user string
 }
 
-// NewCredentials takes the instanceID, ip address, password and user of the Windows instance created and returns the
-// Credentials structure
-func NewCredentials(instanceID, ipAddress, password, user string) *Credentials {
-	return &Credentials{instanceID: instanceID, ipAddress: ipAddress, password: password, user: user}
+// NewCredentials takes the instanceID, public and private ip addresses, password, user of the Windows instance
+// created and returns the Credentials structure
+func NewCredentials(instanceID, publicIPAddress, privateIPAddress, password, user string) *Credentials {
+	return &Credentials{instanceID: instanceID, publicIPAddress: publicIPAddress, privateIPAddress: privateIPAddress,
+		password: password, user: user}
 }
 
-// GetIPAddress returns the ip address of the given node
-func (cred *Credentials) GetIPAddress() string {
-	return cred.ipAddress
+// GetPublicIPAddress returns the ip address of the given node
+func (cred *Credentials) GetPublicIPAddress() string {
+	return cred.publicIPAddress
+}
+
+// GetPrivateIPAddress returns the ip address of the given node
+func (cred *Credentials) GetPrivateIPAddress() string {
+	return cred.privateIPAddress
 }
 
 // GetPassword returns the password associated with the given node
