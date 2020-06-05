@@ -976,7 +976,7 @@ func (az *AzureProvider) CreateWindowsVM() (types.WindowsVM, error) {
 	// Build new credentials structure to be used by other actors. The actor is responsible for checking if
 	// the credentials are being generated properly. This method won't guarantee the existence of credentials
 	// if the VM is spun up
-	credentials := types.NewCredentials(instanceName, *publicIPAddress, adminPassword, winUser)
+	credentials := types.NewCredentials(instanceName, *publicIPAddress, privateIPAddress, adminPassword, winUser)
 	w.Credentials = credentials
 
 	// Setup Winrm and SSH client so that we can interact with the Windows Object we created
