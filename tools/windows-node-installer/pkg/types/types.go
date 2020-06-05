@@ -63,7 +63,10 @@ type WindowsVM interface {
 	// Credentials are returned before usage.
 	GetCredentials() *Credentials
 	// Reinitialize re-initializes the Windows VM. Presently only the ssh client is reinitialized.
-	Reinitialize(bool) error
+	Reinitialize() error
+	// SetupConnectivity sets up SSH and WinRM client to be used for connectivity. The argument tells if we need to
+	// use privateIP or publicIP for establishing SSH and WinRM clients
+	SetupConnectivity(bool) error
 }
 
 func (w *Windows) CopyFile(filePath, remoteDir string) error {
@@ -153,11 +156,11 @@ func (w *Windows) GetCredentials() *Credentials {
 	return w.Credentials
 }
 
-func (w *Windows) Reinitialize(overPrivateIP bool) error {
-	if err := w.GetSSHClient(overPrivateIP); err != nil {
+func (w *Windows) Reinitialize() error {
+	if err := w.GetSSHClient(); err != nil {
 		return fmt.Errorf("failed to reinitialize ssh client: %v", err)
 	}
-	if err := w.SetupWinRMClient(overPrivateIP); err != nil {
+	if err := w.SetupWinRMClient(); err != nil {
 		return fmt.Errorf("failed to reinitialize WinRM client: %v", err)
 	}
 	return nil
@@ -165,9 +168,9 @@ func (w *Windows) Reinitialize(overPrivateIP bool) error {
 
 // SetupWinRMClient sets up the winrm client to be used while accessing Windows node. If overPrivateIP has been set,
 // the WinRM connection gets established via privateIP else connection happens over public IP
-func (w *Windows) SetupWinRMClient(overPrivateIP bool) error {
+func (w *Windows) SetupWinRMClient(usePrivateIP bool) error {
 	var host string
-	if overPrivateIP {
+	if usePrivateIP {
 		host = w.Credentials.GetPrivateIPAddress()
 	} else {
 		host = w.Credentials.GetPublicIPAddress()
@@ -222,9 +225,30 @@ func (w *Windows) ConfigureOpenSSHServer() error {
 	return nil
 }
 
+// SetupConnectivity sets up the connectivity for the Windows VM created. This should be called only once after the
+// creation of the Windows VM
+func (w *Windows) SetupConnectivity(usePrivateIP bool) error {
+	// Setup Winrm and SSH client so that we can interact with the Windows Object we created
+	if err := w.SetupWinRMClient(usePrivateIP); err != nil {
+		return fmt.Errorf("failed to setup winRM client for the Windows VM: %v", err)
+	}
+	// Wait for some time before starting configuring of ssh server. This is to let sshd service be available
+	// in the list of services
+	// TODO: Parse the output of the `Get-Service sshd, ssh-agent` on the Windows node to check if the windows nodes
+	// has those services present
+	time.Sleep(time.Minute)
+	if err := w.ConfigureOpenSSHServer(); err != nil {
+		return fmt.Errorf("failed to configure OpenSSHServer on the Windows VM: %v", err)
+	}
+	if err := w.GetSSHClient(usePrivateIP); err != nil {
+		return fmt.Errorf("failed to get ssh client for the Windows VM created: %v", err)
+	}
+	return nil
+}
+
 // GetSSHClient gets the ssh client associated with Windows VM created. If overPrivateIP has been set, the ssh
 // connection gets established via privateIP else connection happens over public IP
-func (w *Windows) GetSSHClient(overPrivateIP bool) error {
+func (w *Windows) GetSSHClient(usePrivateIP bool) error {
 	if w.SSHClient != nil {
 		// Close the existing client to be on the safe side
 		if err := w.SSHClient.Close(); err != nil {
@@ -232,7 +256,7 @@ func (w *Windows) GetSSHClient(overPrivateIP bool) error {
 		}
 	}
 	var host string
-	if overPrivateIP {
+	if usePrivateIP {
 		host = w.Credentials.GetPrivateIPAddress()
 	} else {
 		host = w.Credentials.GetPublicIPAddress()

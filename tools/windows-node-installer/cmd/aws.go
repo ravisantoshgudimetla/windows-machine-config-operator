@@ -86,9 +86,13 @@ func createCmd() *cobra.Command {
 				return fmt.Errorf("error creating aws client, %v", err)
 			}
 			// TODO: Use the Windows VM object to get password, user name etc here.
-			_, err = cloud.CreateWindowsVM()
+			windowsVM, err := cloud.CreateWindowsVM()
 			if err != nil {
 				return fmt.Errorf("error creating Windows Instance, %v", err)
+			}
+			usePrivateIP := false
+			if err := windowsVM.SetupConnectivity(usePrivateIP); err != nil {
+				return fmt.Errorf("error connecting to the Windows VM : %v", err)
 			}
 			return nil
 		},

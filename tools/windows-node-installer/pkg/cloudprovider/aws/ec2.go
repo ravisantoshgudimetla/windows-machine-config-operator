@@ -204,22 +204,6 @@ func (a *AwsProvider) CreateWindowsVM() (windowsVM types.WindowsVM, err error) {
 	credentials := types.NewCredentials(instanceID, publicIPAddress, privateIPAddress, decryptedPassword, winUser)
 	w.Credentials = credentials
 
-	// Setup Winrm and SSH client so that we can interact with the Windows Object we created
-	if err := w.SetupWinRMClient(); err != nil {
-		return nil, fmt.Errorf("failed to setup winRM client for the Windows VM: %v", err)
-	}
-	// Wait for some time before starting configuring of ssh server. This is to let sshd service be available
-	// in the list of services
-	// TODO: Parse the output of the `Get-Service sshd, ssh-agent` on the Windows node to check if the windows nodes
-	// has those services present
-	time.Sleep(time.Minute)
-	if err := w.ConfigureOpenSSHServer(); err != nil {
-		return w, fmt.Errorf("failed to configure OpenSSHServer on the Windows VM: %v", err)
-	}
-	if err := w.GetSSHClient(); err != nil {
-		return w, fmt.Errorf("failed to get ssh client for the Windows VM created: %v", err)
-	}
-
 	err = resource.AppendInstallerInfo([]string{instanceID}, []string{}, a.resourceTrackerDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to record instance ID to file at '%s',instance will not be able to be deleted, "+
