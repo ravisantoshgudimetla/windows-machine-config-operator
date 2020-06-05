@@ -44,6 +44,8 @@ type Windows struct {
 	SSHClient *ssh.Client
 	// WinrmClient to access the Windows VM created
 	WinrmClient *winrm.Client
+
+	usePrivateIP bool
 }
 
 // WindowsVM is the interface for interacting with a Windows object created by the cloud provider
@@ -168,9 +170,9 @@ func (w *Windows) Reinitialize() error {
 
 // SetupWinRMClient sets up the winrm client to be used while accessing Windows node. If overPrivateIP has been set,
 // the WinRM connection gets established via privateIP else connection happens over public IP
-func (w *Windows) SetupWinRMClient(usePrivateIP bool) error {
+func (w *Windows) SetupWinRMClient() error {
 	var host string
-	if usePrivateIP {
+	if w.usePrivateIP {
 		host = w.Credentials.GetPrivateIPAddress()
 	} else {
 		host = w.Credentials.GetPublicIPAddress()
@@ -228,8 +230,9 @@ func (w *Windows) ConfigureOpenSSHServer() error {
 // SetupConnectivity sets up the connectivity for the Windows VM created. This should be called only once after the
 // creation of the Windows VM
 func (w *Windows) SetupConnectivity(usePrivateIP bool) error {
+	w.usePrivateIP = usePrivateIP
 	// Setup Winrm and SSH client so that we can interact with the Windows Object we created
-	if err := w.SetupWinRMClient(usePrivateIP); err != nil {
+	if err := w.SetupWinRMClient(); err != nil {
 		return fmt.Errorf("failed to setup winRM client for the Windows VM: %v", err)
 	}
 	// Wait for some time before starting configuring of ssh server. This is to let sshd service be available
@@ -240,7 +243,7 @@ func (w *Windows) SetupConnectivity(usePrivateIP bool) error {
 	if err := w.ConfigureOpenSSHServer(); err != nil {
 		return fmt.Errorf("failed to configure OpenSSHServer on the Windows VM: %v", err)
 	}
-	if err := w.GetSSHClient(usePrivateIP); err != nil {
+	if err := w.GetSSHClient(); err != nil {
 		return fmt.Errorf("failed to get ssh client for the Windows VM created: %v", err)
 	}
 	return nil
@@ -248,7 +251,7 @@ func (w *Windows) SetupConnectivity(usePrivateIP bool) error {
 
 // GetSSHClient gets the ssh client associated with Windows VM created. If overPrivateIP has been set, the ssh
 // connection gets established via privateIP else connection happens over public IP
-func (w *Windows) GetSSHClient(usePrivateIP bool) error {
+func (w *Windows) GetSSHClient() error {
 	if w.SSHClient != nil {
 		// Close the existing client to be on the safe side
 		if err := w.SSHClient.Close(); err != nil {
@@ -256,7 +259,7 @@ func (w *Windows) GetSSHClient(usePrivateIP bool) error {
 		}
 	}
 	var host string
-	if usePrivateIP {
+	if w.usePrivateIP {
 		host = w.Credentials.GetPrivateIPAddress()
 	} else {
 		host = w.Credentials.GetPublicIPAddress()
