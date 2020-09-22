@@ -113,6 +113,7 @@ type winNodeBootstrapper struct {
 	// TODO: When more services are added consider decomposing the services to a separate Service struct with common functions
 	// kubeletSVC is a pointer to the kubelet Windows service object
 	kubeletSVC *mgr.Service
+	services kubeletService
 	// svcMgr is used to interact with the Windows service API
 	svcMgr *mgr.Mgr
 	// installDir is the directory the the kubelet service will be installed
@@ -125,6 +126,13 @@ type winNodeBootstrapper struct {
 	// cni holds all the CNI specific information
 	cni *cniOptions
 }
+
+type kubeletService struct {
+	name *mgr.Service
+	dependentServices []string
+	args []string // or map
+}
+
 
 // cniOptions is responsible for reconfiguring the kubelet service with CNI configuration
 type cniOptions struct {
@@ -149,8 +157,10 @@ func NewWinNodeBootstrapper(k8sInstallDir, ignitionFile, kubeletPath string, cni
 	if (cniDir == "" && cniConfig != "") || (cniDir != "" && cniConfig == "") {
 		return nil, fmt.Errorf("both cniDir and cniConfig need to be populated")
 	}
-
+	var kubeletSvc = kubeletService {name: "kubelet", dependentServices: []strings{"docker"}, args:}
 	svcMgr, err := mgr.Connect()
+	// Dependency order as of now is static
+
 	if err != nil {
 		return nil, fmt.Errorf("could not connect to Windows SCM: %s", err)
 	}
